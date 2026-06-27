@@ -29,6 +29,7 @@ from dataclasses import dataclass
 
 from src.config import settings
 from src.services.circuit_breaker import circuit_breaker
+from src.services.rate_limit_scheduler import scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +105,16 @@ class PostCallProcessor:
                 single_prompt,
             )
 
-            start_time = datetime.utcnow()
-            response = await self._call_llm(prompt)
+            # Check scheduler before sending request
+            if not scheduler.can_process_request():
+                raise Exception("LLM capacity exceeded. Retry later.")
+            scheduler.reserve_capacity()
+            try:
+                start_time = datetime.utcnow()
+                response = await self._call_llm(prompt)
+            finally:
+                scheduler.release_capacity()
+
             elapsed_ms = (datetime.utcnow() - start_time).total_seconds() * 1000
 
             result = self._parse_response(response, elapsed_ms)
